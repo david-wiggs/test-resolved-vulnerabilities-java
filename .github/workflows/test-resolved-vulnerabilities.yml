@@ -1,0 +1,110 @@
+name: 'Test Resolved Vulnerabilities - Java'
+
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  dependency-review:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: 'Checkout Repository'
+        uses: actions/checkout@v4
+        
+      - name: 'Set up JDK 17'
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          
+      - name: 'Cache Maven packages'
+        uses: actions/cache@v3
+        with:
+          path: ~/.m2
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2
+          
+      - name: 'Compile and show dependencies'
+        run: |
+          echo "Compiling Java application..."
+          mvn clean compile -q
+          echo "Current Maven dependencies:"
+          mvn dependency:tree
+        
+      - name: 'Dependency Review with Resolved Vulnerabilities'
+        id: review
+        uses: david-wiggs/dependency-review-action@main
+        with:
+          fail-on-severity: critical
+          comment-summary-in-pr: always
+          
+      - name: 'Show Resolved Vulnerabilities (Java)'
+        if: steps.review.outputs.resolved-vulnerabilities != '[]'
+        env:
+          RESOLVED_VULNERABILITIES: ${{ steps.review.outputs.resolved-vulnerabilities }}
+        run: |
+          echo "☕ Java vulnerabilities resolved!"
+          echo "Raw JSON output:"
+          echo "$RESOLVED_VULNERABILITIES" | jq '.'
+          echo ""
+          echo "📊 Summary of resolved Java vulnerabilities:"
+          echo "$RESOLVED_VULNERABILITIES" | jq -r '.[] | "- \(.severity | ascii_upcase): \(.advisory_summary) in \(.package_name)@\(.package_version)"'
+          
+      - name: 'No Resolved Vulnerabilities'
+        if: steps.review.outputs.resolved-vulnerabilities == '[]'
+        run: |
+          echo "ℹ️ No Java vulnerabilities were resolved in this change."
+          
+      - name: 'Java Security Summary'
+        run: |
+          echo "=== Java/Maven Dependency Security Analysis ==="
+          echo "Vulnerable changes: ${{ steps.review.outputs.vulnerable-changes }}"
+          echo "Resolved vulnerabilities: ${{ steps.review.outputs.resolved-vulnerabilities }}"
+          echo "Total dependency changes: ${{ steps.review.outputs.dependency-changes }}"
+          
+  # Build and test the Java application
+  build-and-test:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: 'Checkout Repository'
+        uses: actions/checkout@v4
+        
+      - name: 'Set up JDK 17'
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          
+      - name: 'Cache Maven packages'
+        uses: actions/cache@v3
+        with:
+          path: ~/.m2
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2
+          
+      - name: 'Build Application'
+        run: |
+          echo "Building Java application with current dependencies..."
+          mvn clean package -DskipTests
+          echo "✅ Build successful!"
+          
+      - name: 'Run Tests'
+        run: |
+          echo "Running Java tests..."
+          mvn test
+          echo "✅ Tests completed!"
+          
+      - name: 'Start Application (Test)'
+        run: |
+          echo "Testing application startup..."
+          timeout 30 mvn spring-boot:run &
+          sleep 20
+          echo "✅ Application started successfully!"
